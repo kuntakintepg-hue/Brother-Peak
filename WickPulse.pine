@@ -352,12 +352,16 @@ for i = 0 to math.min(tensionLookback - 2, 5)
 bool tensionBuilding = wicksShrinking and wickCompression < tensionThreshold * sensMultiplier
 float tensionScore   = tensionBuilding ? (1.0 - wickCompression) * 100 : 0.0
 
+// Pre-compute outside conditional scope to avoid Pine warnings
+float tensionHigh = ta.highest(high, tensionLookback)
+float tensionLow  = ta.lowest(low, tensionLookback)
+
 // Draw tension zones
 var box tensionBox = na
 if showTension and tensionBuilding
     if not na(tensionBox)
         box.delete(tensionBox)
-    tensionBox := box.new(bar_index - tensionLookback, ta.highest(high, tensionLookback), bar_index, ta.lowest(low, tensionLookback), border_color=tensionColor, bgcolor=tensionColor, border_width=1, border_style=line.style_dashed)
+    tensionBox := box.new(bar_index - tensionLookback, tensionHigh, bar_index, tensionLow, border_color=tensionColor, bgcolor=tensionColor, border_width=1, border_style=line.style_dashed)
 else if not tensionBuilding and not na(tensionBox)
     box.delete(tensionBox)
     tensionBox := na
@@ -492,17 +496,19 @@ if bearSignal
     if wickDNA == "BearReject"
         bearTip += "\n• Wick DNA: Bear Rejection"
 
-// Signal markers
-plotshape(bullSignal, title="WickPulse Long", style=shape.labelup, location=location.belowbar, color=bullColor, textcolor=color.white, text="WP", size=size.small, tooltip=bullTip)
-plotshape(bearSignal, title="WickPulse Short", style=shape.labeldown, location=location.abovebar, color=bearColor, textcolor=color.white, text="WP", size=size.small, tooltip=bearTip)
+// Signal markers (labels support tooltips for detailed breakdown)
+if bullSignal
+    label.new(bar_index, low, "WP", style=label.style_label_up, color=bullColor, textcolor=color.white, size=size.small, tooltip=bullTip)
+if bearSignal
+    label.new(bar_index, high, "WP", style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small, tooltip=bearTip)
 
 // --- Sub-signals (optional) ---
-plotshape(showAllSignals and bearTrap and not bullSignal, title="Bear Trap", style=shape.triangleup, location=location.belowbar, color=color.new(bullColor, 40), size=size.tiny, tooltip="Bear Trap detected")
-plotshape(showAllSignals and bullTrap and not bearSignal, title="Bull Trap", style=shape.triangledown, location=location.abovebar, color=color.new(bearColor, 40), size=size.tiny, tooltip="Bull Trap detected")
-plotshape(showAllSignals and bullExhaustion, title="Bull Exhaustion", style=shape.xcross, location=location.abovebar, color=color.new(bearColor, 50), size=size.tiny, tooltip="Uptrend Exhaustion")
-plotshape(showAllSignals and bearExhaustion, title="Bear Exhaustion", style=shape.xcross, location=location.belowbar, color=color.new(bullColor, 50), size=size.tiny, tooltip="Downtrend Exhaustion")
-plotshape(showAllSignals and bullWickDiv, title="Bull Wick Divergence", style=shape.diamond, location=location.belowbar, color=color.new(bullColor, 50), size=size.tiny, tooltip="Wick Divergence (Bullish)")
-plotshape(showAllSignals and bearWickDiv, title="Bear Wick Divergence", style=shape.diamond, location=location.abovebar, color=color.new(bearColor, 50), size=size.tiny, tooltip="Wick Divergence (Bearish)")
+plotshape(showAllSignals and bearTrap and not bullSignal, title="Bear Trap", style=shape.triangleup, location=location.belowbar, color=color.new(bullColor, 40), size=size.tiny)
+plotshape(showAllSignals and bullTrap and not bearSignal, title="Bull Trap", style=shape.triangledown, location=location.abovebar, color=color.new(bearColor, 40), size=size.tiny)
+plotshape(showAllSignals and bullExhaustion, title="Bull Exhaustion", style=shape.xcross, location=location.abovebar, color=color.new(bearColor, 50), size=size.tiny)
+plotshape(showAllSignals and bearExhaustion, title="Bear Exhaustion", style=shape.xcross, location=location.belowbar, color=color.new(bullColor, 50), size=size.tiny)
+plotshape(showAllSignals and bullWickDiv, title="Bull Wick Divergence", style=shape.diamond, location=location.belowbar, color=color.new(bullColor, 50), size=size.tiny)
+plotshape(showAllSignals and bearWickDiv, title="Bear Wick Divergence", style=shape.diamond, location=location.abovebar, color=color.new(bearColor, 50), size=size.tiny)
 
 // --- Wick Pressure Background ---
 bgcolor(strongBullPressure ? color.new(bullColor, 93) : strongBearPressure ? color.new(bearColor, 93) : na, title="Wick Pressure Background")
