@@ -20,7 +20,7 @@ showDashboard     = input.bool(true, "Show Dashboard", group=grpCore)
 // --- Phantom Levels ---
 grpPhantom = "Phantom Levels"
 showPhantomLevels = input.bool(true, "Show Phantom Levels", group=grpPhantom)
-phantomLookback   = input.int(50, "Phantom Lookback", minval=10, maxval=200, group=grpPhantom, tooltip="How far back to scan for wick clusters")
+phantomLookback   = input.int(20, "Phantom Lookback", minval=10, maxval=50, group=grpPhantom, tooltip="How far back to scan for wick clusters")
 phantomStrength   = input.int(3, "Min Wick Touches", minval=2, maxval=10, group=grpPhantom, tooltip="Minimum wick tips needed to form a Phantom Level")
 phantomZoneWidth  = input.float(0.3, "Zone Width (ATR %)", minval=0.05, maxval=1.0, step=0.05, group=grpPhantom, tooltip="Width of Phantom zones as % of ATR")
 
@@ -155,104 +155,104 @@ bool strongBearPressure = wickPressureIndex < -pressureThresh
 // Price bodies lie. Wicks don't. Where wick tips cluster = where real
 // orders sit. These are the levels nobody draws but everybody reacts to.
 
-// We'll use a simple density approach: bucket wick tips and find clusters.
+// Rolling wick-tip tracker: collect wick tips bar-by-bar (no nested loops)
+var float[] wickLows  = array.new_float(0)  // lower wick tip history
+var float[] wickHighs = array.new_float(0)  // upper wick tip history
 
+// Only track wicks with meaningful size
+float curLowerWick = math.min(close, open) - low
+float curUpperWick = high - math.max(close, open)
+
+if curLowerWick > atrVal * 0.1
+    array.push(wickLows, low)
+    if array.size(wickLows) > phantomLookback
+        array.shift(wickLows)
+
+if curUpperWick > atrVal * 0.1
+    array.push(wickHighs, high)
+    if array.size(wickHighs) > phantomLookback
+        array.shift(wickHighs)
+
+// Find phantom levels only on last bar (single pass, no O(n²))
 var float[] phantomBullLevels = array.new_float(0)
 var float[] phantomBearLevels = array.new_float(0)
-var int[]   phantomBullBars   = array.new_int(0)
-var int[]   phantomBearBars   = array.new_int(0)
 
-if showPhantomLevels and bar_index > phantomLookback
-    // Zone width for clustering
+bool nearPhantomBull = false
+bool nearPhantomBear = false
+
+if showPhantomLevels and barstate.islast
+    array.clear(phantomBullLevels)
+    array.clear(phantomBearLevels)
     float zoneW = atrVal * phantomZoneWidth
 
-    // Clear old levels periodically
-    if bar_index % 10 == 0
-        array.clear(phantomBullLevels)
-        array.clear(phantomBearLevels)
-        array.clear(phantomBullBars)
-        array.clear(phantomBearBars)
+    // Sort and cluster lower wick tips (support)
+    if array.size(wickLows) >= phantomStrength
+        float[] sortedLows = array.copy(wickLows)
+        array.sort(sortedLows, order.ascending)
+        int cluster = 1
+        float clusterSum = array.get(sortedLows, 0)
+        for i = 1 to array.size(sortedLows) - 1
+            if array.get(sortedLows, i) - array.get(sortedLows, i - 1) <= zoneW
+                cluster += 1
+                clusterSum += array.get(sortedLows, i)
+            else
+                if cluster >= phantomStrength
+                    array.push(phantomBullLevels, clusterSum / cluster)
+                cluster := 1
+                clusterSum := array.get(sortedLows, i)
+        if cluster >= phantomStrength
+            array.push(phantomBullLevels, clusterSum / cluster)
 
-        // Scan for lower wick tip clusters (potential support / phantom bull levels)
-        for i = 0 to phantomLookback - 1
-            float tipLow = low[i]
-            int   count  = 0
-            for j = 0 to phantomLookback - 1
-                if j != i
-                    float otherLow = low[j]
-                    float lwJ = math.min(close[j], open[j]) - low[j]
-                    if math.abs(tipLow - otherLow) <= zoneW and lwJ > atrVal * 0.15
-                        count += 1
-            if count >= phantomStrength - 1
-                // Check we don't already have a nearby level
-                bool duplicate = false
-                for k = 0 to array.size(phantomBullLevels) - 1
-                    if math.abs(array.get(phantomBullLevels, k) - tipLow) < zoneW * 2
-                        duplicate := true
-                        break
-                if not duplicate
-                    array.push(phantomBullLevels, tipLow)
-                    array.push(phantomBullBars, bar_index)
-
-        // Scan for upper wick tip clusters (potential resistance / phantom bear levels)
-        for i = 0 to phantomLookback - 1
-            float tipHigh = high[i]
-            int   count   = 0
-            for j = 0 to phantomLookback - 1
-                if j != i
-                    float otherHigh = high[j]
-                    float uwJ = high[j] - math.max(close[j], open[j])
-                    if math.abs(tipHigh - otherHigh) <= zoneW and uwJ > atrVal * 0.15
-                        count += 1
-            if count >= phantomStrength - 1
-                bool duplicate = false
-                for k = 0 to array.size(phantomBearLevels) - 1
-                    if math.abs(array.get(phantomBearLevels, k) - tipHigh) < zoneW * 2
-                        duplicate := true
-                        break
-                if not duplicate
-                    array.push(phantomBearLevels, tipHigh)
-                    array.push(phantomBearBars, bar_index)
+    // Sort and cluster upper wick tips (resistance)
+    if array.size(wickHighs) >= phantomStrength
+        float[] sortedHighs = array.copy(wickHighs)
+        array.sort(sortedHighs, order.ascending)
+        int cluster = 1
+        float clusterSum = array.get(sortedHighs, 0)
+        for i = 1 to array.size(sortedHighs) - 1
+            if array.get(sortedHighs, i) - array.get(sortedHighs, i - 1) <= zoneW
+                cluster += 1
+                clusterSum += array.get(sortedHighs, i)
+            else
+                if cluster >= phantomStrength
+                    array.push(phantomBearLevels, clusterSum / cluster)
+                cluster := 1
+                clusterSum := array.get(sortedHighs, i)
+        if cluster >= phantomStrength
+            array.push(phantomBearLevels, clusterSum / cluster)
 
 // Draw Phantom Levels
 var box[] phantomBoxes = array.new_box(0)
 
-// Clean old boxes
-if array.size(phantomBoxes) > 0
+if barstate.islast
+    // Clean old boxes
     for i = array.size(phantomBoxes) - 1 to 0
         box.delete(array.get(phantomBoxes, i))
     array.clear(phantomBoxes)
 
-if showPhantomLevels and barstate.islast
-    float zoneW = atrVal * phantomZoneWidth
-    for i = 0 to array.size(phantomBullLevels) - 1
-        float lvl = array.get(phantomBullLevels, i)
-        if math.abs(close - lvl) < atrVal * 5  // only draw nearby levels
-            array.push(phantomBoxes, box.new(bar_index - phantomLookback, lvl + zoneW / 2, bar_index + 10, lvl - zoneW / 2, border_color=color.new(bullColor, 60), bgcolor=phantomBullColor, border_width=1, border_style=line.style_dotted))
-    for i = 0 to array.size(phantomBearLevels) - 1
-        float lvl = array.get(phantomBearLevels, i)
-        if math.abs(close - lvl) < atrVal * 5
-            array.push(phantomBoxes, box.new(bar_index - phantomLookback, lvl + zoneW / 2, bar_index + 10, lvl - zoneW / 2, border_color=color.new(bearColor, 60), bgcolor=phantomBearColor, border_width=1, border_style=line.style_dotted))
+    if showPhantomLevels
+        float zoneW = atrVal * phantomZoneWidth
+        for i = 0 to array.size(phantomBullLevels) - 1
+            float lvl = array.get(phantomBullLevels, i)
+            if math.abs(close - lvl) < atrVal * 8
+                array.push(phantomBoxes, box.new(bar_index - phantomLookback, lvl + zoneW / 2, bar_index + 10, lvl - zoneW / 2, border_color=color.new(bullColor, 60), bgcolor=phantomBullColor, border_width=1, border_style=line.style_dotted))
+        for i = 0 to array.size(phantomBearLevels) - 1
+            float lvl = array.get(phantomBearLevels, i)
+            if math.abs(close - lvl) < atrVal * 8
+                array.push(phantomBoxes, box.new(bar_index - phantomLookback, lvl + zoneW / 2, bar_index + 10, lvl - zoneW / 2, border_color=color.new(bearColor, 60), bgcolor=phantomBearColor, border_width=1, border_style=line.style_dotted))
 
 // Is price near a phantom level right now?
-bool nearPhantomBull = false
-bool nearPhantomBear = false
-float phantomBullDist = 999999.0
-float phantomBearDist = 999999.0
-
 if array.size(phantomBullLevels) > 0
     for i = 0 to array.size(phantomBullLevels) - 1
         float dist = math.abs(low - array.get(phantomBullLevels, i))
-        if dist < atrVal * 1.2
+        if dist < atrVal * 1.5
             nearPhantomBull := true
-            phantomBullDist := math.min(phantomBullDist, dist)
 
 if array.size(phantomBearLevels) > 0
     for i = 0 to array.size(phantomBearLevels) - 1
         float dist = math.abs(high - array.get(phantomBearLevels, i))
-        if dist < atrVal * 1.2
+        if dist < atrVal * 1.5
             nearPhantomBear := true
-            phantomBearDist := math.min(phantomBearDist, dist)
 
 // ============================================================================
 // 4. TRAP DETECTION — Who just got caught?
@@ -529,9 +529,10 @@ barcolor(dnaBarColor, title="Wick DNA Bar Color")
 // 11. DASHBOARD
 // ============================================================================
 
-if showDashboard and barstate.islast
-    var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(#1a1a2e, 10), frame_color=color.new(#e0e0e0, 70), frame_width=1, border_color=color.new(#e0e0e0, 80), border_width=1)
+// Table MUST be declared at global scope with var (not inside if block)
+var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(#1a1a2e, 10), frame_color=color.new(#e0e0e0, 70), frame_width=1, border_color=color.new(#e0e0e0, 80), border_width=1)
 
+if showDashboard and barstate.islast
     table.cell(dash, 0, 0, "WickPulse", text_color=color.new(#FFFFFF, 0), text_size=size.normal, bgcolor=color.new(#0f3460, 10), text_halign=text.align_left)
     table.cell(dash, 1, 0, "Engine", text_color=color.new(#FFFFFF, 0), text_size=size.normal, bgcolor=color.new(#0f3460, 10), text_halign=text.align_right)
 
@@ -580,6 +581,9 @@ if showDashboard and barstate.islast
     string phantomStr = "S: " + str.tostring(array.size(phantomBullLevels)) + " | R: " + str.tostring(array.size(phantomBearLevels))
     table.cell(dash, 0, 8, "Phantom Levels", text_color=color.gray, text_size=size.small, text_halign=text.align_left)
     table.cell(dash, 1, 8, phantomStr, text_color=color.white, text_size=size.small, text_halign=text.align_right)
+
+if not showDashboard
+    table.clear(dash, 0, 0, 1, 8)
 
 // ============================================================================
 // 12. ALERTS
