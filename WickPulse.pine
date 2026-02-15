@@ -180,7 +180,7 @@ var float[] phantomBearLevels = array.new_float(0)
 bool nearPhantomBull = false
 bool nearPhantomBear = false
 
-if showPhantomLevels and barstate.islast
+if showPhantomLevels and barstate.islast and not na(atrVal)
     array.clear(phantomBullLevels)
     array.clear(phantomBearLevels)
     float zoneW = atrVal * phantomZoneWidth
@@ -225,10 +225,11 @@ if showPhantomLevels and barstate.islast
 var box[] phantomBoxes = array.new_box(0)
 
 if barstate.islast
-    // Clean old boxes
-    for i = array.size(phantomBoxes) - 1 to 0
-        box.delete(array.get(phantomBoxes, i))
-    array.clear(phantomBoxes)
+    // Clean old boxes (MUST check size > 0 or for loop crashes with -1 to 0)
+    if array.size(phantomBoxes) > 0
+        for i = array.size(phantomBoxes) - 1 to 0
+            box.delete(array.get(phantomBoxes, i))
+        array.clear(phantomBoxes)
 
     if showPhantomLevels
         float zoneW = atrVal * phantomZoneWidth
