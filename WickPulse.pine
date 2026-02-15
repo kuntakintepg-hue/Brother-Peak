@@ -93,9 +93,11 @@ float wickAsymmetry  = (upperWick - lowerWick) / math.max(totalRange, atrVal * 0
 // +1 = all upper wick (bearish rejection), -1 = all lower wick (bullish rejection)
 
 // --- Relative Volume (handle instruments with no volume data) ---
-bool hasVolume = not na(volume) and volume > 0
-float avgVol   = hasVolume ? ta.sma(volume, wickLookback) : 1.0
-float relVol   = hasVolume ? volume / math.max(avgVol, 1) : 1.0  // default to 1.0 when no data
+// ta.sma MUST be called every bar (not inside ternary) or Pine corrupts its state
+bool hasVolume   = not na(volume) and volume > 0
+float volSma     = ta.sma(volume, wickLookback)
+float avgVol     = hasVolume ? volSma : 1.0
+float relVol     = hasVolume ? volume / math.max(avgVol, 1) : 1.0
 
 // ============================================================================
 // 1. WICK DNA — Classify each candle's wick fingerprint
@@ -298,9 +300,12 @@ if bullTrap
 bool bullExhaustion = false  // uptrend running out of steam
 bool bearExhaustion = false  // downtrend running out of steam
 
+// ta.sma must be called every bar, not inside conditional scope
+float closeSma = ta.sma(close, wickLookback)
+
 if showExhaustion
     // Check for uptrend exhaustion
-    bool inUptrend = close > ta.sma(close, wickLookback)
+    bool inUptrend = close > closeSma
     if inUptrend
         // Count diminishing bodies + growing upper wicks over N bars
         int dimBodyCount = 0
@@ -317,7 +322,7 @@ if showExhaustion
         bullExhaustion := dimBodyCount >= 2 and growUpperCount >= 2
 
     // Check for downtrend exhaustion
-    bool inDowntrend = close < ta.sma(close, wickLookback)
+    bool inDowntrend = close < closeSma
     if inDowntrend
         int dimBodyCount = 0
         int growLowerCount = 0
